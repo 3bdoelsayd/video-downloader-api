@@ -12,9 +12,10 @@ CORS(app)
 DOWNLOAD_FOLDER = "/tmp/downloads"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
+COOKIES_FILE = "cookies.txt"
+
 
 def cleanup_old_files():
-    """حذف الملفات القديمة كل ساعة"""
     while True:
         time.sleep(3600)
         now = time.time()
@@ -42,14 +43,18 @@ def home():
 
 @app.route("/info", methods=["POST"])
 def get_info():
-    """جلب معلومات الفيديو بدون تحميل"""
     data = request.json or {}
     url = data.get("url", "").strip()
     if not url:
         return jsonify({"error": "الرابط فاضي"}), 400
 
     try:
-        ydl_opts = {"quiet": True, "noplaylist": True, "skip_download": True}
+        ydl_opts = {
+            "quiet": True,
+            "noplaylist": True,
+            "skip_download": True,
+            "cookiefile": COOKIES_FILE,
+        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({
@@ -81,6 +86,7 @@ def download():
             "noplaylist": True,
             "quiet": True,
             "merge_output_format": "mp4",
+            "cookiefile": COOKIES_FILE,
         }
 
         if quality == "audio":
@@ -97,11 +103,12 @@ def download():
             ext = "mp3" if quality == "audio" else "mp4"
             filename = f"{file_id}.{ext}"
 
-        base_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000")
+        base_url = os.environ.get("RAILWAY_STATIC_URL",
+                   os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000"))
         return jsonify({
             "title": title,
             "thumbnail": thumbnail,
-            "download_url": f"{base_url}/file/{filename}",
+            "download_url": f"https://{base_url}/file/{filename}" if not base_url.startswith("http") else f"{base_url}/file/{filename}",
             "filename": filename,
         })
 
@@ -111,7 +118,6 @@ def download():
 
 @app.route("/file/<filename>")
 def serve_file(filename):
-    # أمان: منع path traversal
     filename = os.path.basename(filename)
     path = os.path.join(DOWNLOAD_FOLDER, filename)
     if not os.path.exists(path):
