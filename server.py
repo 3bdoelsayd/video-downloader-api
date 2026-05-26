@@ -10,9 +10,14 @@ app = Flask(__name__)
 CORS(app)
 
 DOWNLOAD_FOLDER = "/tmp/downloads"
+COOKIES_FILE = "/tmp/cookies.txt"
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-COOKIES_FILE = "cookies.txt"
+# كتابة الـ cookies من الـ Environment Variable
+cookies_content = os.environ.get("COOKIES_CONTENT", "")
+if cookies_content:
+    with open(COOKIES_FILE, "w") as f:
+        f.write(cookies_content)
 
 
 def cleanup_old_files():
@@ -36,6 +41,13 @@ def get_format(quality):
         return f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]"
 
 
+def get_ydl_opts_base():
+    opts = {"quiet": True, "noplaylist": True}
+    if os.path.exists(COOKIES_FILE):
+        opts["cookiefile"] = COOKIES_FILE
+    return opts
+
+
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"status": "✅ السيرفر شغّال!"})
@@ -49,12 +61,8 @@ def get_info():
         return jsonify({"error": "الرابط فاضي"}), 400
 
     try:
-        ydl_opts = {
-            "quiet": True,
-            "noplaylist": True,
-            "skip_download": True,
-            "cookiefile": COOKIES_FILE,
-        }
+        ydl_opts = get_ydl_opts_base()
+        ydl_opts["skip_download"] = True
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return jsonify({
@@ -80,14 +88,12 @@ def download():
         file_id = str(uuid.uuid4())[:8]
         output_template = os.path.join(DOWNLOAD_FOLDER, f"{file_id}.%(ext)s")
 
-        ydl_opts = {
+        ydl_opts = get_ydl_opts_base()
+        ydl_opts.update({
             "format": get_format(quality),
             "outtmpl": output_template,
-            "noplaylist": True,
-            "quiet": True,
             "merge_output_format": "mp4",
-            "cookiefile": COOKIES_FILE,
-        }
+        })
 
         if quality == "audio":
             ydl_opts["postprocessors"] = [{
@@ -103,12 +109,16 @@ def download():
             ext = "mp3" if quality == "audio" else "mp4"
             filename = f"{file_id}.{ext}"
 
-        base_url = os.environ.get("RAILWAY_STATIC_URL",
-                   os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:5000"))
+        base_url = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+        if base_url:
+            download_url = f"https://{base_url}/file/{filename}"
+        else:
+            download_url = f"http://localhost:5000/file/{filename}"
+
         return jsonify({
             "title": title,
             "thumbnail": thumbnail,
-            "download_url": f"https://{base_url}/file/{filename}" if not base_url.startswith("http") else f"{base_url}/file/{filename}",
+            "download_url": download_url,
             "filename": filename,
         })
 
